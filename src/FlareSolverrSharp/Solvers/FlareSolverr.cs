@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -80,6 +80,7 @@ namespace FlareSolverrSharp.Solvers
                     _httpClient = new HttpClient();
                     // wait 5 more seconds to make sure we return the FlareSolverr timeout message
                     _httpClient.Timeout = TimeSpan.FromMilliseconds(MaxTimeout + 5000);
+                    _httpClient.DefaultRequestHeaders.Add("X-Jackett-Concurrency", SemaphoreLocker.MaxConcurrency.ToString());
                     response = await _httpClient.PostAsync(_flareSolverrUri, flareSolverrRequest);
                 }
                 catch (HttpRequestException e)
@@ -94,6 +95,9 @@ namespace FlareSolverrSharp.Solvers
                 {
                     _httpClient.Dispose();
                 }
+
+                // Check for divergence and memory warnings reported by Byparr / FlareSolverr
+                CheckConcurrencyHeaders(response);
 
                 // Don't try parsing if FlareSolverr hasn't returned 200 or 500
                 if (response.StatusCode != HttpStatusCode.OK && response.StatusCode != HttpStatusCode.InternalServerError)
@@ -145,6 +149,35 @@ namespace FlareSolverrSharp.Solvers
             });
 
             return result;
+        }
+
+        private static void CheckConcurrencyHeaders(HttpResponseMessage response)
+        {
+            if (response == null)
+                return;
+
+            try
+            {
+                if (response.Headers.TryGetValues("X-Concurrency-Divergence", out var divergenceValues))
+                {
+                    foreach (var div in divergenceValues)
+                    {
+                        Console.WriteLine($"[FlareSolverrSharp Concurrency Divergence] {div}");
+                    }
+                }
+
+                if (response.Headers.TryGetValues("X-Memory-Warning", out var memoryWarnings))
+                {
+                    foreach (var warn in memoryWarnings)
+                    {
+                        Console.WriteLine($"[FlareSolverrSharp Memory Warning] {warn}");
+                    }
+                }
+            }
+            catch
+            {
+                // Silently ignore header inspection failures
+            }
         }
 
         private FlareSolverrRequestProxy GetProxy()
